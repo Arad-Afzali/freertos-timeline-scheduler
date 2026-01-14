@@ -1,0 +1,26 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug Timeline Scheduler (QEMU)",
+            "type": "cortex-debug",
+            "request": "launch",
+            "cwd": "${workspaceFolder}",
+            "executable": "${workspaceFolder}/build/scheduler.elf",
+            "servertype": "qemu",
+            "device": "STM32F103C8",
+            "cpu": "cortex-m3",
+            "machine": "lm3s6965evb",
+            "preLaunchTask": "Build FreeRTOS Scheduler",
+            "runToEntryPoint": "main",
+            "serverArgs": [
+                "-nographic",
+                "-monitor", "none"
+            ],
+            "showDevDebugOutput": "parsed",
+            "gdbPath": "arm-none-eabi-gdb"
+        }
+    ]
+}
+
+
