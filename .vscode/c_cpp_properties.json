@@ -1,0 +1,26 @@
+{
+    "configurations": [
+        {
+            "name": "ARM Cortex-M3",
+            "includePath": [
+                "${workspaceFolder}/include",
+                "${workspaceFolder}/group50-config-arad-FreeRTOS-Kernel/FreeRTOS-Kernel/include",
+                "${workspaceFolder}/group50-config-arad-FreeRTOS-Kernel/FreeRTOS-Kernel/portable/GCC/ARM_CM3"
+            ],
+            "defines": [
+                "__ARM_ARCH_7M__",
+                "__CORTEX_M3__",
+                "GCC_ARMCM3"
+            ],
+            "compilerPath": "arm-none-eabi-gcc",
+            "cStandard": "c11",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "gcc-arm",
+            "compilerArgs": [
+                "-mcpu=cortex-m3",
+                "-mthumb"
+            ]
+        }
+    ],
+    "version": 4
+}
