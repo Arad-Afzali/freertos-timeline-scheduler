@@ -43,7 +43,6 @@ void vConfigureScheduler( TimelineConfig_t *pxConfig )
 {
     uint32_t ulIndex, ulCheckIndex;
     TimelineTaskConfig_t *pxTask, *pxOther;
-    TaskHandle_t xHandle;
 
     // Basic validation
     configASSERT( pxConfig != NULL );
@@ -51,15 +50,18 @@ void vConfigureScheduler( TimelineConfig_t *pxConfig )
     configASSERT( pxConfig->pxTasks != NULL );
     configASSERT( pxConfig->ulNumTasks <= MAX_TIMELINE_TASKS );
 
-    // Validate time windows
+    // Validate time windows (HRT tasks only - SRT tasks have no fixed slot)
     for( ulIndex = 0; ulIndex < pxConfig->ulNumTasks; ulIndex++ )
     {
         pxTask = &pxConfig->pxTasks[ ulIndex ];
 
-        // Ensure task fits within the major frame
-        configASSERT( pxTask->ulEnd_time <= MAJOR_FRAME_TICKS );
-        // Ensure start time is before end time
-        configASSERT( pxTask->ulStart_time < pxTask->ulEnd_time );
+        if( pxTask->xType == HARD_RT )
+        {
+            // Ensure HRT task fits within the major frame
+            configASSERT( pxTask->ulEnd_time <= MAJOR_FRAME_TICKS );
+            // Ensure start time is before end time
+            configASSERT( pxTask->ulStart_time < pxTask->ulEnd_time );
+        }
     }
 
     // Check for HRT overlaps
@@ -91,28 +93,15 @@ void vConfigureScheduler( TimelineConfig_t *pxConfig )
         }
     }
 
-    // Create tasks and populate schedule table
+    // Populate schedule table (task creation is done by lifecycle manager)
     xSystemTimeline.ulTaskCount = 0;
     xSystemTimeline.ulMajorFrameTicks = MAJOR_FRAME_TICKS;
 
     for( ulIndex = 0; ulIndex < pxConfig->ulNumTasks; ulIndex++ )
     {
         pxTask = &pxConfig->pxTasks[ ulIndex ];
-        xHandle = NULL;
 
-        BaseType_t xResult = xTaskCreate( pxTask->pxTaskFunction,
-                         pxTask->pcTaskName,
-                         pxTask->usStackDepth,
-                         NULL,
-                         tskIDLE_PRIORITY + 1,
-                         &xHandle );
-        
-        configASSERT( xResult == pdPASS );
-
-        // Suspend immediately - our scheduler will resume at the right time
-        vTaskSuspend( xHandle );
-
-        xSystemTimeline.xEntries[ ulIndex ].xHandle = xHandle;
+        xSystemTimeline.xEntries[ ulIndex ].xHandle = NULL;  // Set later by lifecycle manager
         xSystemTimeline.xEntries[ ulIndex ].ulStartTime = pxTask->ulStart_time;
         xSystemTimeline.xEntries[ ulIndex ].ulEndTime = pxTask->ulEnd_time;
         xSystemTimeline.xEntries[ ulIndex ].ucTaskType = (uint8_t)pxTask->xType;

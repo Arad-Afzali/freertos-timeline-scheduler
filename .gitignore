@@ -1,0 +1,17 @@
+# Build output
+build/
+*.o
+*.elf
+*.bin
+*.map
+*.lst
+
+# QEMU logs
+/tmp/qemu_serial.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/

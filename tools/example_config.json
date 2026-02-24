@@ -1,0 +1,41 @@
+{
+  "major_frame_ticks": 1000,
+  "tasks": [
+    {
+      "name": "SensorRead",
+      "function_name": "vSensorReadTask",
+      "task_type": "HARD_RT",
+      "start_time": 0,
+      "end_time": 50,
+      "subframe_id": 0,
+      "stack_depth": 256
+    },
+    {
+      "name": "DataProcess",
+      "function_name": "vDataProcessTask",
+      "task_type": "HARD_RT",
+      "start_time": 100,
+      "end_time": 200,
+      "subframe_id": 1,
+      "stack_depth": 512
+    },
+    {
+      "name": "Actuator",
+      "function_name": "vActuatorTask",
+      "task_type": "HARD_RT",
+      "start_time": 300,
+      "end_time": 400,
+      "subframe_id": 2,
+      "stack_depth": 256
+    },
+    {
+      "name": "Logging",
+      "function_name": "vLoggingTask",
+      "task_type": "SOFT_RT",
+      "start_time": 0,
+      "end_time": 1000,
+      "subframe_id": 0,
+      "stack_depth": 128
+    }
+  ]
+}

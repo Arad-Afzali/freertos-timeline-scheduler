@@ -17,8 +17,16 @@
 #include "trace.h"
 #include <stdio.h>
 
+/* ===== Assert handler ===== */
+void vAssertCalled(const char *file, int line)
+{
+    taskDISABLE_INTERRUPTS();
+    printf("[ASSERT FAILED] %s:%d\n", file, line);
+    for(;;);
+}
+
 /* ===== Test Configuration Flags ===== */
-volatile uint32_t g_test_mode = 0;          // 0 = normal, 1 = test mode
+volatile uint32_t g_test_mode = 1;          // 1 = test mode (print trace after 3 frames)
 volatile uint32_t g_test_complete = 0;      // Test completion flag
 volatile uint32_t g_test_errors = 0;        // Error counter
 volatile uint32_t g_test_frame_count = 0;   // Frame counter for testing
@@ -33,8 +41,12 @@ static void Task_HRT_A(void *pvParameters)
 {
     (void)pvParameters;
     
+    // Wait for activation from cyclic executive (Ali's kernel)
+    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    
     // Log task start
     vTraceTaskStart(xTaskGetCurrentTaskHandle());
+    printf("[HRT_A] Activated at tick %u\n", (unsigned)xTaskGetTickCount());
     
     // Simulate deterministic work (e.g., sensor reading)
     volatile uint32_t counter = 0;
@@ -45,8 +57,13 @@ static void Task_HRT_A(void *pvParameters)
     
     // Log task completion
     vTraceTaskComplete(xTaskGetCurrentTaskHandle(), pdFALSE, 0);
+    printf("[HRT_A] Completed at tick %u\n", (unsigned)xTaskGetTickCount());
     
-    // Task terminates naturally
+    // Suspend self forever - lifecycle manager will delete/recreate at frame reset
+    for(;;)
+    {
+        vTaskSuspend(NULL);
+    }
 }
 
 /**
@@ -57,7 +74,11 @@ static void Task_HRT_B(void *pvParameters)
 {
     (void)pvParameters;
     
+    // Wait for activation from cyclic executive
+    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    
     vTraceTaskStart(xTaskGetCurrentTaskHandle());
+    printf("[HRT_B] Activated at tick %u\n", (unsigned)xTaskGetTickCount());
     
     // Simulate work
     volatile uint32_t counter = 0;
@@ -67,6 +88,13 @@ static void Task_HRT_B(void *pvParameters)
     }
     
     vTraceTaskComplete(xTaskGetCurrentTaskHandle(), pdFALSE, 0);
+    printf("[HRT_B] Completed at tick %u\n", (unsigned)xTaskGetTickCount());
+    
+    // Suspend self forever
+    for(;;)
+    {
+        vTaskSuspend(NULL);
+    }
 }
 
 /* ===== Example SRT Task Functions ===== */
@@ -95,6 +123,12 @@ static void Task_SRT_X(void *pvParameters)
     }
     
     vTraceTaskComplete(xTaskGetCurrentTaskHandle(), pdFALSE, 0);
+    
+    // Suspend self forever - lifecycle manager will delete at frame reset
+    for(;;)
+    {
+        vTaskSuspend(NULL);
+    }
 }
 
 /**
@@ -117,6 +151,12 @@ static void Task_SRT_Y(void *pvParameters)
     }
     
     vTraceTaskComplete(xTaskGetCurrentTaskHandle(), pdFALSE, 0);
+    
+    // Suspend self forever - lifecycle manager will delete at frame reset
+    for(;;)
+    {
+        vTaskSuspend(NULL);
+    }
 }
 
 /* ===== Timeline Configuration ===== */

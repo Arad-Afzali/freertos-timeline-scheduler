@@ -1,5 +1,7 @@
 
 #include "lifecycle_manager.h"
+#include "cyclic.h"
+#include "timeline_config.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -129,14 +131,32 @@ void vLifecycleManagerStart( void )
     xTimelineManager.xFrameStartTick = xTaskGetTickCount();
     xTimelineManager.ulCurrentFrame = 1;
 
+    /* Build HRT table for Ali's cyclic executive engine */
+    static HRT_Entry_t xHRTTable[ MAX_TIMELINE_TASKS ];
+    UBaseType_t uxHRTCount = 0;
+
+    for( uint32_t i = 0; i < xTimelineManager.ulNumTasks; i++ )
+    {
+        TaskRuntimeState_t* pxTask = &xTimelineManager.pxRuntimeStates[ i ];
+
+        if( pxTask->pxConfig->xType == HARD_RT )
+        {
+            xHRTTable[ uxHRTCount ].Task = pxTask->xTaskHandle;
+            xHRTTable[ uxHRTCount ].ulStartTimeTicks = pxTask->pxConfig->ulStart_time;
+            uxHRTCount++;
+        }
+    }
+
+    /* Initialize the cyclic executive with the HRT schedule */
+    vCyclicExecInit( MAJOR_FRAME_TICKS, xHRTTable, uxHRTCount );
+
     /* Start the major frame timer */
     xTimerStart( xTimelineManager.xFrameResetTimer, 0 );
 
-    printf( "[START] Timeline scheduler started at tick %u\n", 
+    printf( "[START] Timeline scheduler started at tick %u\n",
             (unsigned int)xTimelineManager.xFrameStartTick );
-
-    /* Note: The Timeline Manager task is already created and will start running
-     * based on its priority. Ali's kernel will trigger HRT tasks at their start times. */
+    printf( "[START] HRT tasks in cyclic table: %u\n",
+            (unsigned int)uxHRTCount );
 }
 
 void vMonitorHRTDeadlines( void )
@@ -149,7 +169,7 @@ void vMonitorHRTDeadlines( void )
         TaskRuntimeState_t* pxTask = &xTimelineManager.pxRuntimeStates[ i ];
 
         /* Only check HRT tasks that are running */
-        if( pxTask->pxConfig->xType == HARD_RT && pxTask->xIsRunning )
+        if( pxTask->pxConfig->xType == HARD_RT && pxTask->xIsRunning && pxTask->xTaskHandle != NULL )
         {
             if( xFrameTime >= pxTask->pxConfig->ulEnd_time )
             {
@@ -180,7 +200,7 @@ void vScheduleSRTTasks( void )
         ulCurrentSRTIndex = ( ulCurrentSRTIndex + 1 ) % xTimelineManager.ulNumTasks;
 
         /* Check if this is an SRT task and not completed */
-        if( pxTask->pxConfig->xType == SOFT_RT && !pxTask->xIsCompleted )
+        if( pxTask->pxConfig->xType == SOFT_RT && !pxTask->xIsCompleted && pxTask->xTaskHandle != NULL )
         {
             /* Resume this SRT task if suspended */
             if( eTaskGetState( pxTask->xTaskHandle ) == eSuspended )
@@ -200,6 +220,10 @@ void vHandleMajorFrameReset( void )
     
     LOG_FRAME_RESET( xTimelineManager.ulCurrentFrame, xCurrentTick );
 
+    /* Suspend scheduler to ensure atomic reset — no other task can run
+     * while we delete and recreate all tasks. */
+    vTaskSuspendAll();
+
     /* Delete all tasks */
     prvDeleteAllTasks();
 
@@ -209,6 +233,7 @@ void vHandleMajorFrameReset( void )
     /* Recreate all tasks from original configuration */
     if( prvCreateAllTasks() != pdPASS )
     {
+        xTaskResumeAll();
         LOG_ERROR( "Critical: Failed to recreate tasks during frame reset!" );
         /* This is a critical error - system cannot continue */
         configASSERT( 0 );
@@ -220,6 +245,30 @@ void vHandleMajorFrameReset( void )
 
     /* Reset SRT task index */
     ulCurrentSRTIndex = 0;
+
+    /* Rebuild the HRT table for the cyclic executive with new task handles */
+    {
+        static HRT_Entry_t xHRTTable[ MAX_TIMELINE_TASKS ];
+        UBaseType_t uxHRTCount = 0;
+
+        for( uint32_t i = 0; i < xTimelineManager.ulNumTasks; i++ )
+        {
+            TaskRuntimeState_t* pxTask = &xTimelineManager.pxRuntimeStates[ i ];
+
+            if( pxTask->pxConfig->xType == HARD_RT )
+            {
+                xHRTTable[ uxHRTCount ].Task = pxTask->xTaskHandle;
+                xHRTTable[ uxHRTCount ].ulStartTimeTicks = pxTask->pxConfig->ulStart_time;
+                uxHRTCount++;
+            }
+        }
+
+        /* Reinitialize cyclic executive with new handles and reset start tick */
+        vCyclicExecInit( MAJOR_FRAME_TICKS, xHRTTable, uxHRTCount );
+    }
+
+    /* Resume scheduler before restarting the timer (timer operations need scheduler) */
+    xTaskResumeAll();
 
     /* Restart the frame reset timer for next frame */
     xTimerReset( xTimelineManager.xFrameResetTimer, 0 );
@@ -418,8 +467,13 @@ static BaseType_t prvCreateAllTasks( void )
             return pdFAIL;
         }
 
-        /* Suspend task initially */
-        vTaskSuspend( pxState->xTaskHandle );
+        /* HRT tasks block on ulTaskNotifyTake in their function body,
+         * so they don't need to be suspended. SRT tasks are suspended
+         * until the lifecycle manager resumes them during idle gaps. */
+        if( pxConfig->xType == SOFT_RT )
+        {
+            vTaskSuspend( pxState->xTaskHandle );
+        }
 
         /* Create deadline timer for HRT tasks */
         if( pxConfig->xType == HARD_RT )

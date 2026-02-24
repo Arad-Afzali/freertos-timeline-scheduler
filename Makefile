@@ -10,7 +10,7 @@ GDB = $(PREFIX)gdb
 
 BUILD_DIR = build
 SRC_DIR = src
-FREERTOS_DIR = group50-config-arad-FreeRTOS-Kernel/FreeRTOS-Kernel
+FREERTOS_DIR = FreeRTOS-Kernel
 INC_DIR = include
 
 TARGET = scheduler
@@ -24,6 +24,7 @@ FREERTOS_SRC = \
     $(FREERTOS_DIR)/queue.c \
     $(FREERTOS_DIR)/list.c \
     $(FREERTOS_DIR)/timers.c \
+    $(FREERTOS_DIR)/cyclic.c \
     $(FREERTOS_DIR)/portable/MemMang/heap_4.c \
     $(FREERTOS_DIR)/portable/GCC/ARM_CM3/port.c
 
@@ -33,6 +34,7 @@ SOURCES = $(FREERTOS_SRC) $(APP_SRC)
 
 INCLUDES = \
     -I$(INC_DIR) \
+    -I$(FREERTOS_DIR) \
     -I$(FREERTOS_DIR)/include \
     -I$(FREERTOS_DIR)/portable/GCC/ARM_CM3
 
@@ -59,10 +61,10 @@ OBJECTS = $(addprefix $(BUILD_DIR)/, $(notdir $(SOURCES:.c=.o)))
 .PHONY: all clean size help
 
 all: $(BUILD_DIR)/$(TARGET).elf
-	@echo.
-	@echo ===== Build Complete =====
+	@echo ""
+	@echo "===== Build Complete ====="
 	@$(SIZE) $<
-	@echo.
+	@echo ""
 
 $(BUILD_DIR)/$(TARGET).elf: $(OBJECTS) | $(BUILD_DIR)
 	@echo Linking: $@
@@ -87,26 +89,26 @@ $(BUILD_DIR)/%.o: $(FREERTOS_DIR)/portable/GCC/ARM_CM3/%.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 $(BUILD_DIR):
-	@if not exist $(BUILD_DIR) mkdir $(BUILD_DIR)
+	@mkdir -p $(BUILD_DIR)
 
 size: $(BUILD_DIR)/$(TARGET).elf
-	@echo.
-	@echo ===== Memory Usage =====
+	@echo ""
+	@echo "===== Memory Usage ====="
 	@$(SIZE) --format=berkeley $<
 
 clean:
-	@echo Cleaning build artifacts...
-	@if exist $(BUILD_DIR) rmdir /s /q $(BUILD_DIR)
-	@echo Clean complete.
+	@echo "Cleaning build artifacts..."
+	@rm -rf $(BUILD_DIR)
+	@echo "Clean complete."
 
 help:
-	@echo Timeline Scheduler Makefile
-	@echo.
-	@echo Targets:
-	@echo   all    - Build the project (default)
-	@echo   clean  - Remove build artifacts
-	@echo   size   - Show memory usage
-	@echo   help   - Show this help message
-	@echo.
-	@echo Toolchain: ARM GNU Toolchain 13.2.Rel1
-	@echo QEMU: xPack QEMU Arm 8.2.6-1
+	@echo "Timeline Scheduler Makefile"
+	@echo ""
+	@echo "Targets:"
+	@echo "  all    - Build the project (default)"
+	@echo "  clean  - Remove build artifacts"
+	@echo "  size   - Show memory usage"
+	@echo "  help   - Show this help message"
+	@echo ""
+	@echo "Toolchain: ARM GNU Toolchain"
+	@echo "QEMU: xPack QEMU Arm"

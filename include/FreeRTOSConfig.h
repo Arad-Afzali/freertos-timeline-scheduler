@@ -13,11 +13,12 @@
 #define configCPU_CLOCK_HZ                      ((unsigned long)12000000)
 #define configTICK_RATE_HZ                      ((TickType_t)1000)
 #define configMAX_PRIORITIES                    (5)
-#define configMINIMAL_STACK_SIZE                ((unsigned short)128)
+#define configMINIMAL_STACK_SIZE                ((unsigned short)256)
 #define configMAX_TASK_NAME_LEN                 (16)
 
 /* ===== Memory Configuration ===== */
-#define configTOTAL_HEAP_SIZE                   ((size_t)(10 * 1024))
+#define configTOTAL_HEAP_SIZE                   ((size_t)(20 * 1024))
+#define configCHECK_FOR_STACK_OVERFLOW          2
 
 /* ===== Task Configuration ===== */
 #define configUSE_16_BIT_TICKS                  0
@@ -45,12 +46,12 @@
 #define configMAX_CO_ROUTINE_PRIORITIES         (2)
 
 /* ===== Interrupt Priority Configuration (Cortex-M3) ===== */
+/* LM3S6965 implements 3 priority bits (8 priority levels) */
 #ifndef __NVIC_PRIO_BITS
-    #define __NVIC_PRIO_BITS 4
-    #warning "NVIC priority bits not defined, defaulting to 4 for Cortex-M3"
+    #define __NVIC_PRIO_BITS 3
 #endif
 
-#define configKERNEL_INTERRUPT_PRIORITY         (15 << (8 - __NVIC_PRIO_BITS))
+#define configKERNEL_INTERRUPT_PRIORITY         (7 << (8 - __NVIC_PRIO_BITS))
 #define configMAX_SYSCALL_INTERRUPT_PRIORITY    (5 << (8 - __NVIC_PRIO_BITS))
 #define configMAX_API_CALL_INTERRUPT_PRIORITY   configMAX_SYSCALL_INTERRUPT_PRIORITY
 
@@ -91,11 +92,12 @@
     #define configPRIO_BITS 4
 #endif
 
-#define configLIBRARY_LOWEST_INTERRUPT_PRIORITY         15
+#define configLIBRARY_LOWEST_INTERRUPT_PRIORITY         7
 #define configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY    5
 
 /* ===== Assertion Configuration ===== */
-#define configASSERT(x) if((x) == 0) { taskDISABLE_INTERRUPTS(); for(;;); }
+extern void vAssertCalled(const char *file, int line);
+#define configASSERT(x) if((x) == 0) { vAssertCalled(__FILE__, __LINE__); }
 
 /* ===== Scheduler Configuration ===== */
 #define configUSE_PREEMPTION                    1
