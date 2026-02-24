@@ -216,12 +216,21 @@ Major frame period: **1000 ticks** (= 1000 ms at `configTICK_RATE_HZ = 1000`).
 python3 tests/test_scheduler.py
 ```
 
-The test suite verifies configuration correctness at the source level:
+The test suite has two parts:
+
+**Part A — Static checks** (no hardware needed):
 - HRT time-window overlap detection
 - Timing parameter validation
 - FreeRTOS configuration consistency
 - Build success
 - Memory usage within hardware limits
+
+**Part B — Runtime checks** (boots the scheduler on QEMU):
+- HRT activation — every HRT task fires each frame
+- HRT timing — activation tick matches configured start offset
+- No deadline misses — trace statistics report zero violations
+- Frame reset — multiple frames complete with task destroy/recreate
+- SRT execution — soft real-time tasks run during idle gaps
 
 ---
 
