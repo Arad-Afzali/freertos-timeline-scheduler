@@ -1,326 +1,160 @@
 #!/usr/bin/env python3
 """
-Timeline Scheduler - Automated Test Suite
+Timeline Scheduler - Test Suite
 Author: Stefano (QA & Environment Lead)
 Date: January 14, 2026
+
+Runs 5 static checks on the scheduler configuration:
+  1. HRT overlap       – no two HRT tasks share the same time window
+  2. Timing validity   – every HRT window is well-formed and inside the major frame
+  3. FreeRTOS config   – key kernel settings match expected values
+  4. Build             – the project compiles without errors
+  5. Memory            – FLASH/RAM usage stays within LM3S6965 limits
 """
 
-import sys
-import os
-import re
-import subprocess
-from pathlib import Path
-from dataclasses import dataclass
-from typing import List
+import sys, re, subprocess, os
 
-@dataclass
-class Task:
-    name: str
-    type: str
-    start_time: int
-    end_time: int
-    subframe_id: int
-    stack_depth: int
+# ---------- paths ----------------------------------------------------------
+SCRIPT_DIR  = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.join(SCRIPT_DIR, "..")
 
-@dataclass
-class TestResult:
-    test_name: str
-    passed: bool
-    message: str
-    details: str = ""
+# ---------- helpers --------------------------------------------------------
 
-class TestSuite:
-    def __init__(self, project_root: str = "."):
-        self.project_root = Path(project_root)
-        self.tasks: List[Task] = []
-        self.test_results: List[TestResult] = []
-        self.major_frame_ticks = 1000
-        self.config_data = {}
-        
-    def parse_configuration(self) -> bool:
-        """Parse scheduler_config.h"""
-        config_file = self.project_root / "include" / "scheduler_config.h"
-        try:
-            with open(config_file, 'r') as f:
-                content = f.read()
-            match = re.search(r'#define\s+MAJOR_FRAME_TICKS\s+(\d+)', content)
-            if match:
-                self.major_frame_ticks = int(match.group(1))
-            return True
-        except Exception as e:
-            print(f"[ERROR] Failed to parse config: {e}")
-            return False
-    
-    def parse_freertos_config(self) -> bool:
-        """Parse FreeRTOSConfig.h"""
-        config_file = self.project_root / "include" / "FreeRTOSConfig.h"
-        try:
-            with open(config_file, 'r') as f:
-                content = f.read()
-            
-            patterns = {
-                'configUSE_PREEMPTION': r'#define\s+configUSE_PREEMPTION\s+(\d+)',
-                'configUSE_TIMERS': r'#define\s+configUSE_TIMERS\s+(\d+)',
-                'configTICK_RATE_HZ': r'#define\s+configTICK_RATE_HZ\s+\(\s*\(TickType_t\)\s*(\d+)',
-            }
-            
-            for key, pattern in patterns.items():
-                match = re.search(pattern, content)
-                if match:
-                    self.config_data[key] = int(match.group(1))
-            
-            return True
-        except Exception as e:
-            print(f"[ERROR] Failed to parse FreeRTOS config: {e}")
-            return False
-    
-    def parse_timeline_config(self) -> bool:
-        """Parse main.c to extract tasks"""
-        main_file = self.project_root / "src" / "main.c"
-        try:
-            with open(main_file, 'r', encoding='utf-8') as f:
-                lines = f.readlines()
-            
-            in_array = False
-            current = {}
-            
-            for line in lines:
-                line = line.strip()
-                
-                if 'TimelineTaskConfig_t' in line and '[]' in line:
-                    in_array = True
-                    continue
-                
-                if not in_array:
-                    continue
-                
-                if '.pcTaskName' in line:
-                    match = re.search(r'"([^"]+)"', line)
-                    if match:
-                        current['name'] = match.group(1)
-                
-                elif '.xType' in line:
-                    current['type'] = 'HARD_RT' if 'HARD_RT' in line else 'SOFT_RT'
-                
-                elif '.ulStart_time' in line:
-                    match = re.search(r'=\s*(\d+)', line)
-                    if match:
-                        current['start'] = int(match.group(1))
-                
-                elif '.ulEnd_time' in line:
-                    match = re.search(r'=\s*(\d+)', line)
-                    if match:
-                        current['end'] = int(match.group(1))
-                
-                elif '.ulSubframe_id' in line:
-                    match = re.search(r'=\s*(\d+)', line)
-                    if match:
-                        current['subframe'] = int(match.group(1))
-                
-                elif '.usStackDepth' in line:
-                    current['stack'] = 128  # Default
-                
-                if '}' in line and 'name' in current:
-                    task = Task(
-                        name=current['name'],
-                        type=current['type'],
-                        start_time=current.get('start', 0),
-                        end_time=current.get('end', 0),
-                        subframe_id=current.get('subframe', 0),
-                        stack_depth=current.get('stack', 128)
-                    )
-                    self.tasks.append(task)
-                    print(f"  ✓ {task.name} ({task.type}) [{task.start_time}-{task.end_time}]")
-                    current = {}
-                
-                if in_array and '};' in line:
-                    break
-            
-            return len(self.tasks) > 0
-            
-        except Exception as e:
-            print(f"[ERROR] Failed to parse tasks: {e}")
-            return False
-    
-    def test_hrt_overlap(self) -> TestResult:
-        """Test 1: Check HRT task overlaps"""
-        hrt = [t for t in self.tasks if t.type == "HARD_RT"]
-        
-        if len(hrt) < 2:
-            return TestResult("HRT Overlap", True, "No overlap possible")
-        
-        overlaps = []
-        for i, t1 in enumerate(hrt):
-            for t2 in hrt[i+1:]:
-                if t1.start_time < t2.end_time and t2.start_time < t1.end_time:
-                    overlaps.append(f"{t1.name} overlaps {t2.name}")
-        
-        if overlaps:
-            return TestResult("HRT Overlap", False, 
-                            f"Found {len(overlaps)} overlap(s)", 
-                            "\n".join(overlaps))
-        
-        return TestResult("HRT Overlap", True, 
-                         f"All {len(hrt)} HRT tasks OK")
-    
-    def test_timing(self) -> TestResult:
-        """Test 2: Verify timing consistency"""
-        issues = []
-        
-        for task in self.tasks:
-            if task.type == "HARD_RT":
-                if task.start_time >= task.end_time:
-                    issues.append(f"{task.name}: Invalid window [{task.start_time}-{task.end_time}]")
-                
-                if task.end_time > self.major_frame_ticks:
-                    issues.append(f"{task.name}: Exceeds major frame")
-        
-        if issues:
-            return TestResult("Timing", False, 
-                            f"Found {len(issues)} issue(s)", 
-                            "\n".join(issues))
-        
-        return TestResult("Timing", True, "All tasks valid")
-    
-    def test_freertos_config(self) -> TestResult:
-        """Test 3: Validate FreeRTOS settings"""
-        required = {
-            'configUSE_PREEMPTION': 1,
-            'configUSE_TIMERS': 1,
-            'configTICK_RATE_HZ': 1000,
-        }
-        
-        issues = []
-        for key, expected in required.items():
-            if self.config_data.get(key) != expected:
-                issues.append(f"{key} = {self.config_data.get(key)}, expected {expected}")
-        
-        if issues:
-            return TestResult("FreeRTOS Config", False, 
-                            "Configuration mismatch", 
-                            "\n".join(issues))
-        
-        return TestResult("FreeRTOS Config", True, "Configuration valid")
-    
-    def test_build(self) -> TestResult:
-        """Test 4: Build the project"""
-        try:
-            subprocess.run(['make', 'clean'], 
-                         capture_output=True, timeout=10, 
-                         cwd=self.project_root)
-            
-            result = subprocess.run(['make', 'all'], 
-                                  capture_output=True, text=True, 
-                                  timeout=120, cwd=self.project_root)
-            
-            if result.returncode != 0:
-                return TestResult("Build", False, "Build failed", 
-                                result.stderr[-500:])
-            
-            elf = self.project_root / "build" / "scheduler.elf"
-            if not elf.exists():
-                return TestResult("Build", False, "ELF not found")
-            
-            return TestResult("Build", True, "Build successful")
-            
-        except subprocess.TimeoutExpired:
-            return TestResult("Build", False, "Build timeout")
-        except Exception as e:
-            return TestResult("Build", False, str(e))
-    
-    def test_memory(self) -> TestResult:
-        """Test 5: Check memory usage"""
-        try:
-            elf = self.project_root / "build" / "scheduler.elf"
-            result = subprocess.run(['arm-none-eabi-size', str(elf)],
-                                  capture_output=True, text=True, timeout=5)
-            
-            if result.returncode != 0:
-                return TestResult("Memory", False, "Size check failed")
-            
-            lines = result.stdout.strip().split('\n')
-            if len(lines) < 2:
-                return TestResult("Memory", False, "Invalid output")
-            
-            values = lines[1].split()
-            text = int(values[0])
-            data = int(values[1])
-            bss = int(values[2])
-            
-            flash_used = text + data
-            ram_used = data + bss
-            flash_limit = 256 * 1024
-            ram_limit = 64 * 1024
-            
-            details = f"FLASH: {flash_used:,}/{flash_limit:,} ({flash_used/flash_limit*100:.1f}%)\n"
-            details += f"RAM: {ram_used:,}/{ram_limit:,} ({ram_used/ram_limit*100:.1f}%)"
-            
-            if flash_used > flash_limit or ram_used > ram_limit:
-                return TestResult("Memory", False, "Exceeds limits", details)
-            
-            return TestResult("Memory", True, "Within limits", details)
-            
-        except Exception as e:
-            return TestResult("Memory", False, str(e))
-    
-    def run_all_tests(self) -> bool:
-        """Run all tests"""
-        print("\n" + "="*60)
-        print("TIMELINE SCHEDULER - AUTOMATED TEST SUITE")
-        print("Author: Stefano (QA & Environment Lead)")
-        print("="*60 + "\n")
-        
-        print("[1/3] Parsing configurations...")
-        if not self.parse_configuration():
-            return False
-        if not self.parse_freertos_config():
-            return False
-        
-        print(f"\n[2/3] Parsing tasks from main.c...")
-        if not self.parse_timeline_config():
-            return False
-        
-        print(f"\n[3/3] Running tests...")
-        self.test_results = [
-            self.test_hrt_overlap(),
-            self.test_timing(),
-            self.test_freertos_config(),
-            self.test_build(),
-            self.test_memory(),
-        ]
-        
-        print("\n" + "="*60)
-        print("TEST RESULTS")
-        print("="*60)
-        
-        passed = failed = 0
-        for r in self.test_results:
-            status = "✅ PASS" if r.passed else "❌ FAIL"
-            print(f"\n{status} {r.test_name}")
-            print(f"  → {r.message}")
-            if r.details:
-                for line in r.details.split('\n'):
-                    print(f"    {line}")
-            
-            if r.passed:
-                passed += 1
-            else:
-                failed += 1
-        
-        print("\n" + "="*60)
-        print(f"SUMMARY: {passed}/{passed+failed} passed")
-        print("="*60 + "\n")
-        
-        return failed == 0
+def read_file(rel_path):
+    """Read a file relative to the project root and return its content."""
+    with open(os.path.join(PROJECT_ROOT, rel_path)) as f:
+        return f.read()
+
+def find_define(text, name):
+    """Return the integer value of a #define, or None."""
+    m = re.search(r'#define\s+' + name + r'\s+\(?\s*\(?\w*\)?\s*(\d+)', text)
+    return int(m.group(1)) if m else None
+
+def parse_tasks():
+    """Extract task entries from the TimelineTaskConfig_t array in main.c."""
+    content = read_file("src/main.c")
+    tasks = []
+    # find each { ... } block inside the array
+    array_match = re.search(
+        r'TimelineTaskConfig_t\s+\w+\[\]\s*=\s*\{(.+?)};',
+        content, re.DOTALL)
+    if not array_match:
+        return tasks
+    for block in re.finditer(r'\{([^}]+)\}', array_match.group(1)):
+        fields = block.group(1)
+        name  = re.search(r'\.pcTaskName\s*=\s*"([^"]+)"', fields)
+        ttype = "HRT" if "HARD_RT" in fields else "SRT"
+        start = re.search(r'\.ulStart_time\s*=\s*(\d+)', fields)
+        end   = re.search(r'\.ulEnd_time\s*=\s*(\d+)',   fields)
+        if name and start and end:
+            tasks.append({
+                "name":  name.group(1),
+                "type":  ttype,
+                "start": int(start.group(1)),
+                "end":   int(end.group(1)),
+            })
+    return tasks
+
+# ---------- tests ----------------------------------------------------------
+
+def test_hrt_overlap(tasks):
+    """No two HRT tasks should have overlapping time windows."""
+    hrt = [t for t in tasks if t["type"] == "HRT"]
+    for i, a in enumerate(hrt):
+        for b in hrt[i+1:]:
+            if a["start"] < b["end"] and b["start"] < a["end"]:
+                return False, f'{a["name"]} overlaps {b["name"]}'
+    return True, f"no overlaps among {len(hrt)} HRT tasks"
+
+def test_timing(tasks):
+    """Every HRT window must satisfy start < end <= MAJOR_FRAME_TICKS."""
+    cfg = read_file("include/scheduler_config.h")
+    major = find_define(cfg, "MAJOR_FRAME_TICKS") or 1000
+    for t in tasks:
+        if t["type"] != "HRT":
+            continue
+        if t["start"] >= t["end"]:
+            return False, f'{t["name"]}: start >= end'
+        if t["end"] > major:
+            return False, f'{t["name"]}: end_time exceeds major frame ({major})'
+    return True, "all HRT windows valid"
+
+def test_freertos_config():
+    """Check that key FreeRTOS settings have the expected values."""
+    cfg = read_file("include/FreeRTOSConfig.h")
+    checks = {
+        "configUSE_PREEMPTION": 1,
+        "configUSE_TIMERS":     1,
+        "configTICK_RATE_HZ":   1000,
+    }
+    for name, expected in checks.items():
+        val = find_define(cfg, name)
+        if val != expected:
+            return False, f"{name} = {val}, expected {expected}"
+    return True, "configuration valid"
+
+def test_build():
+    """Run make clean && make all and check for errors."""
+    subprocess.run(["make", "clean"], capture_output=True, cwd=PROJECT_ROOT)
+    r = subprocess.run(["make", "all"], capture_output=True, text=True,
+                       timeout=120, cwd=PROJECT_ROOT)
+    if r.returncode != 0:
+        return False, "build failed:\n" + r.stderr[-300:]
+    elf = os.path.join(PROJECT_ROOT, "build", "scheduler.elf")
+    if not os.path.isfile(elf):
+        return False, "scheduler.elf not found"
+    return True, "build successful"
+
+def test_memory():
+    """Check that FLASH and RAM usage fit within LM3S6965 limits."""
+    elf = os.path.join(PROJECT_ROOT, "build", "scheduler.elf")
+    r = subprocess.run(["arm-none-eabi-size", elf],
+                       capture_output=True, text=True, timeout=5)
+    if r.returncode != 0:
+        return False, "arm-none-eabi-size failed"
+    cols = r.stdout.strip().split("\n")[1].split()
+    text, data, bss = int(cols[0]), int(cols[1]), int(cols[2])
+    flash = text + data
+    ram   = data + bss
+    info  = f"FLASH {flash}/{256*1024}  RAM {ram}/{64*1024}"
+    if flash > 256 * 1024 or ram > 64 * 1024:
+        return False, "exceeds limits — " + info
+    return True, info
+
+# ---------- main -----------------------------------------------------------
 
 def main():
-    script_dir = Path(__file__).parent
-    project_root = script_dir.parent if script_dir.name == "tests" else script_dir
-    
-    suite = TestSuite(project_root=str(project_root))
-    success = suite.run_all_tests()
-    
-    sys.exit(0 if success else 1)
+    print("=" * 50)
+    print("TIMELINE SCHEDULER — TEST SUITE")
+    print("=" * 50)
+
+    tasks = parse_tasks()
+    if not tasks:
+        print("ERROR: could not parse tasks from main.c")
+        sys.exit(1)
+
+    print(f"\nFound {len(tasks)} tasks:")
+    for t in tasks:
+        print(f"  {t['name']:10s}  {t['type']}  [{t['start']}-{t['end']}]")
+
+    tests = [
+        ("HRT Overlap",    lambda: test_hrt_overlap(tasks)),
+        ("Timing",         lambda: test_timing(tasks)),
+        ("FreeRTOS Config", lambda: test_freertos_config()),
+        ("Build",          lambda: test_build()),
+        ("Memory",         lambda: test_memory()),
+    ]
+
+    print("\nRunning tests ...\n")
+    passed = 0
+    for name, fn in tests:
+        ok, msg = fn()
+        status = "PASS" if ok else "FAIL"
+        print(f"  [{status}] {name}: {msg}")
+        passed += ok
+
+    print(f"\n{passed}/{len(tests)} tests passed.")
+    sys.exit(0 if passed == len(tests) else 1)
 
 if __name__ == "__main__":
     main()
