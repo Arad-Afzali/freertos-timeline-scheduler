@@ -1,21 +1,5 @@
 # Timeline Scheduler — FreeRTOS Implementation
 
-**Group 50 — Embedded Operating Systems (2025/26)**  
-**Politecnico di Torino**
-
----
-
-## Team Members & Roles
-
-| Member | Role | Key Contributions |
-|--------|------|-------------------|
-| **Arad** | Project Lead & Configuration | Public API design, `scheduler_config.h`, `timeline_config.c` |
-| **Ali** | Kernel Developer | Cyclic executive engine (`cyclic.c/h`), FreeRTOS kernel integration |
-| **Thiago** | Lifecycle Management | Task lifecycle (`lifecycle_manager.c/h`), frame reset, SRT scheduling |
-| **Alessandro** | Trace & Debug | Trace ring-buffer system (`trace_optimized.c`, `trace.h`) |
-| **Stefano** | QA & Environment Lead | Test harness (`main.c`), test automation, CI environment |
-
----
 
 ## Project Overview
 
